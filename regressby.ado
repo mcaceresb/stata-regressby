@@ -16,7 +16,7 @@
 * Stata wrapper
 *-------------------------------------------------------------------------------
 
-program define regressby3
+program define regressby
 
     * timer off 99
     * timer clear 99
@@ -147,7 +147,7 @@ program define regressby3
     * timer on 99
 
 	* Perform regressions on each by-group, store in dataset
-	mata: _regressby3("`y'", "`x'", "`grp'", "`by'", "`cluster'", "`robust'", `cons', `covs')
+	mata: _regressby("`y'", "`x'", "`grp'", "`by'", "`cluster'", "`robust'", `cons', `covs')
 
     * timer off 99
     * timer list
@@ -189,7 +189,7 @@ version 13.1
 set matastrict on
 
 mata:
-real matrix _regressby3(
+real matrix _regressby(
     string scalar yvar,
     string scalar xvars,
     string scalar grpvar,
