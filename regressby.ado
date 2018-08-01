@@ -18,9 +18,7 @@
 
 program define regressby
 
-    * timer off 99
-    * timer clear 99
-    * timer on 99
+    regressby_timer on 99
 
 	version 12.0
 	syntax varlist(min=2 numeric) [aweight], by(varlist) [ ///
@@ -29,10 +27,9 @@ program define regressby
         replace                                            ///
         NOCOVariance                                       ///
         NOConstant                                         ///
+        BENCHmark                                          ///
+        plugin                                             ///
     ]
-
-	* Preserve dataset in case we crash
-	preserve
 
     qui ds `by'
     local by `r(varlist)'
@@ -71,7 +68,7 @@ program define regressby
 	* Error checking: can't specify both robust and clusterby
 	if ( ("`robust'" != "") & ("`clusterby'" != "") ) {
 		di as error "Error: can't specify both clustered and robust standard errors at once! Choose one."
-		exit
+		exit 198
 	}
 
 	* Display type of standard error chosen
@@ -84,6 +81,21 @@ program define regressby
 	if ( "`clusterby'" != "" ) {
 		di "Running regressby with cluster-robust standard errors (clustered by `clusterby')."
 	}
+
+	if ( ("`plugin'" != "") & ("`clusterby'" != "") ) {
+		di as error "Option {opt plugin} does not yet support {opt vce(cluster)}"
+		exit 198
+	}
+
+	if ( "`plugin'" != "" ) {
+        if ( inlist("`c(os)'", "MacOSX", "Windows") | strpos("`c(machine_type)'", "Mac") ) {
+            disp as err "{opt plugin} only available on Linux"
+            exit 198
+        }
+    }
+
+	* Preserve dataset in case we crash
+	preserve
 
 	* Construct analytical weight variable
     tempvar tmpwt
@@ -141,17 +153,37 @@ program define regressby
 	* Whether to keep covariances
     local covs = ("`nocovariance'" == "")
 
-    * timer off 99
-    * timer list
-    * timer clear 99
-    * timer on 99
+    if ( "`benchmark'" != "" ) {
+        regressby_timer info 99 `"Parsed variables and groups"', prints(1)
+    }
 
 	* Perform regressions on each by-group, store in dataset
-	mata: _regressby("`y'", "`x'", "`grp'", "`by'", "`cluster'", "`robust'", `cons', `covs')
+    if ( "`plugin'" != "" ) {
+        scalar regressby_constant    = `cons'
+        scalar regressby_covariance  = `covs'
+        scalar regressby_robust      = (`"`robust'"'    != "")
+        scalar regressby_cluster     = (`"`cluster'"'   != "")
+        scalar regressby_benchmark   = (`"`benchmark'"' != "")
+        scalar regressby_kx          = `num_x'
 
-    * timer off 99
-    * timer list
-    * timer clear 99
+        tempfile output
+        cap noi plugin call regressby_plugin `grp' `cluster' `y' `x', `"`output'"'
+        if ( _rc ) {
+            local rc = _rc
+            clean_exit
+            exit `rc'
+        }
+
+        mata: _regressby_get(`"`output'"', "`x'", "`by'", `cons', `covs')
+    }
+    else {
+        mata: _regressby("`y'", "`x'", "`grp'", "`by'", "`cluster'", "`robust'", `cons', `covs')
+    }
+
+    if ( "`benchmark'" != "" ) {
+        regressby_timer info 99 `"Ran regressions by group"', prints(1)
+        regressby_timer off 99
+    }
 
 	* Optionally save out to dta and just restore with a message
 	if ( "`save'" == "" ) {
@@ -161,6 +193,7 @@ program define regressby
 		save `save', `replace'
 	}
 
+    clean_exit
     cap scalar drop num_x
     cap scalar drop num_g
 end
@@ -199,6 +232,7 @@ real matrix _regressby(
     real   scalar cons,
     real   scalar covs)
 {
+    stata("regressby_timer on 98")
 
     // class Factor scalar F
     // real matrix XX, Xy
@@ -264,10 +298,9 @@ real matrix _regressby(
     hac1    = (robust != "") & (clusterby == "")
     cluster = (robust == "") & (clusterby != "")
 
-    // stata("timer off 99")
-    // stata("timer list")
-    // stata("timer clear 99")
-    // stata("timer on 99")
+    if ( st_local("benchmark") != "" ) {
+        stata(`"regressby_timer info 98 "    Set up panel", prints(1)"')
+    }
 
     // ------------------------------------------------------------------------
     // Iterate over groups
@@ -335,10 +368,9 @@ real matrix _regressby(
         }
     }
 
-    // stata("timer off 99")
-    // stata("timer list")
-    // stata("timer clear 99")
-    // stata("timer on 99")
+    if ( st_local("benchmark") != "" ) {
+        stata(`"regressby_timer info 98 "    Ran regressions", prints(1)"')
+    }
 
     // ------------------------------------------------------------------------
     // Gather output and pass back into Stata
@@ -373,8 +405,12 @@ real matrix _regressby(
 
     // Keep only one obs per group
     // stata(sprintf("qui by %s: keep if (_n == 1)", grpvar))
-    stata(sprintf("qui by %s: keep if (_n == 1)", byvars))
     stata("keep " + byvars)
+    stata(sprintf("qui by %s: keep if (_n == 1)", byvars))
+    if ( st_local("benchmark") != "" ) {
+        stata(`"regressby_timer info 98 "    Kept one obs per group", prints(1)"')
+    }
+
     (void) st_addvar(addtypes, addvars)
 
     // Number of observations, betas, se, covs
@@ -386,6 +422,10 @@ real matrix _regressby(
     }
 
     stata(sprintf("qui drop if N < %g", kx))
+    if ( st_local("benchmark") != "" ) {
+        stata(`"regressby_timer info 98 "    Read obs, coefs, vcov", prints(1)"')
+    }
+    stata("regressby_timer off 98")
 }
 end
 
@@ -426,3 +466,128 @@ program define my_vce_error
     display `"{red}{bf:vce(`typed')} invalid"'
     error 498
 end
+
+* -----------------------------------------------------------------------------
+* Plugin
+* -----------------------------------------------------------------------------
+
+capture program drop regressby_timer
+program regressby_timer, rclass
+    syntax anything, [prints(int 0) end off]
+    tokenize `"`anything'"'
+    local what  `1'
+    local timer `2'
+    local msg   `"`3'; "'
+
+    if ( inlist("`what'", "start", "on") ) {
+        cap timer off `timer'
+        cap timer clear `timer'
+        timer on `timer'
+    }
+    else if ( inlist("`what'", "info") ) {
+        timer off `timer'
+        qui timer list
+        return scalar t`timer' = `r(t`timer')'
+        return local pretty`timer' = trim("`:di %21.4gc r(t`timer')'")
+        if ( `prints' ) di `"`msg'`:di trim("`:di %21.4gc r(t`timer')'")' seconds"'
+        timer off `timer'
+        timer clear `timer'
+        timer on `timer'
+    }
+
+    if ( "`end'`off'" != "" ) {
+        timer off `timer'
+        timer clear `timer'
+    }
+end
+
+cap mata: mata drop _regressby_get()
+mata
+void function _regressby_get(
+    string scalar fname,
+    string scalar xvars,
+    string scalar byvars,
+    real   scalar cons,
+    real   scalar covs)
+{
+    stata("regressby_timer on 98")
+
+    real scalar fh, nrow, ncol, j, k, kx, kvars
+    real colvector nobs
+    real matrix X
+
+    string rowvector covariates, addvars, addtypes
+    colvector C
+
+    // Covariates to add
+    kx         = st_numscalar("num_x")
+    covariates = tokens(xvars)
+    kvars      = kx + kx + covs * (kx * (kx - 1) / 2)
+    addvars    = J(1, 1 + kvars, "")
+    addvars[1] = "N"
+    addtypes   = st_local("type"), J(1, kvars, st_global("c(type)"))
+    if ( cons ) {
+        covariates[kx] = "cons"
+    }
+
+    for (k = 1; k <= kx; k++) {
+        addvars[1 + k]      = "_b_"  + covariates[k]
+        addvars[1 + k + kx] = "_se_" + covariates[k]
+    }
+    if ( covs ) {
+        i = 2
+        for (k = 1; k <= kx; k++) {
+            for (j = 1; j < k; j++) {
+                addvars[2 * kx + i++] = "_cov_" + covariates[k] + "_" + covariates[j]
+            }
+        }
+    }
+
+    stata("keep " + byvars)
+    stata(sprintf("qui by %s: keep if (_n == 1)", byvars))
+    if ( st_local("benchmark") != "" ) {
+        stata(`"regressby_timer info 98 "    Kept one obs per group", prints(1)"')
+    }
+
+    // Read in results from C
+    fh = fopen(fname, "r")
+    C  = bufio()
+
+    nrow = fbufget(C, fh, "%8z")
+    nobs = fbufget(C, fh, "%8z", nrow, 1)
+    nrow = fbufget(C, fh, "%8z")
+    ncol = fbufget(C, fh, "%8z")
+    X    = fbufget(C, fh, "%8z", nrow, ncol)
+
+    fclose(fh)
+
+    (void) st_addvar(addtypes, addvars)
+
+    // Store in Stata
+    st_store(., "N", nobs)
+    stata(sprintf("qui drop if N < %g", kx))
+    st_store(., addvars[2::(kvars + 1)], X)
+
+    if ( st_local("benchmark") != "" ) {
+        stata(`"regressby_timer info 98 "    Read obs, coefs, vcov", prints(1)"')
+    }
+    stata("regressby_timer off 98")
+}
+end
+
+
+capture program drop clean_exit
+program clean_exit
+    cap scalar drop regressby_constant
+    cap scalar drop regressby_covariance
+    cap scalar drop regressby_robust
+    cap scalar drop regressby_cluster
+    cap scalar drop regressby_benchmark
+    cap scalar drop regressby_kx
+end
+
+if ( inlist("`c(os)'", "MacOSX") | strpos("`c(machine_type)'", "Mac") ) local c_os_ macosx
+else local c_os_: di lower("`c(os)'")
+
+cap program drop regressby_plugin
+program regressby_plugin, plugin using("regressby_`c_os_'.plugin")
