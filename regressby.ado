@@ -1,10 +1,12 @@
+*! version 0.1 01Aug2018
+
 *===============================================================================
 * PROGRAM: regressby.ado
 * PURPOSE: Performs fast grouped univariate OLS regressions.
 *          The following commands are equivalent:
-*			 regressby y x, by(byvars)
-*			 statsby, by(byvars) clear: reg y x
-*		   Except regressby will run 10-100x faster.
+*            regressby y x, by(byvars)
+*            statsby, by(byvars) clear: reg y x
+*          Except regressby will run 10-100x faster.
 *          Also computes standard errors in a variety of flavors: usual
 *          asymptotic standard errors, robust standard errors, and clustered
 *          standard errors.
@@ -20,8 +22,8 @@ program define regressby
 
     regressby_timer on 99
 
-	version 12.0
-	syntax varlist(min=2 numeric) [aweight], by(varlist) [ ///
+    version 12.0
+    syntax varlist(min=2 numeric) [aweight], by(varlist) [ ///
         vce(string)                                        ///
         save(string)                                       ///
         replace                                            ///
@@ -38,8 +40,8 @@ program define regressby
     * missing independent or dependent variables, missing by variable
     * observations, and invalid or missing weights.
 
-	marksample touse, strok
-	markout `touse' `by', strok
+    marksample touse, strok
+    markout `touse' `by', strok
 
     gettoken y x: varlist
     qui ds `x'
@@ -48,75 +50,75 @@ program define regressby
     * XX Remove co-linear variables by group
     * _rmcoll `x', `noconstant' expand
 
-	* Parse VCE option, if specified
-	if ( `"`vce'"' != "" ) {
-		my_vce_parse , vce(`vce')
-		local vcetype    "robust"
-		local clusterby  "`r(clustervar)'"
-		if (`"`vcetype'"'   == "robust") local robust = "robust"
-		if (`"`clusterby'"' != "")       local robust = ""
-	}
+    * Parse VCE option, if specified
+    if ( `"`vce'"' != "" ) {
+        my_vce_parse , vce(`vce')
+        local vcetype    "robust"
+        local clusterby  "`r(clustervar)'"
+        if (`"`vcetype'"'   == "robust") local robust = "robust"
+        if (`"`clusterby'"' != "")       local robust = ""
+    }
 
-	* Check to make sure save data file path is valid
-	if ( ("`replace'" == "") & (`"`savegraph'"' != "") ) {
-		if regexm(`"`savegraph'"',"\.[a-zA-Z0-9]+$") confirm new file `"`save'"'
-		else confirm new file `"`save'.dta"'
+    * Check to make sure save data file path is valid
+    if ( ("`replace'" == "") & (`"`savegraph'"' != "") ) {
+        if regexm(`"`savegraph'"',"\.[a-zA-Z0-9]+$") confirm new file `"`save'"'
+        else confirm new file `"`save'.dta"'
         local savedata 1
-	}
+    }
     else local savedata 0
 
-	* Error checking: can't specify both robust and clusterby
-	if ( ("`robust'" != "") & ("`clusterby'" != "") ) {
-		di as error "Error: can't specify both clustered and robust standard errors at once! Choose one."
-		exit 198
-	}
+    * Error checking: can't specify both robust and clusterby
+    if ( ("`robust'" != "") & ("`clusterby'" != "") ) {
+        di as error "Error: can't specify both clustered and robust standard errors at once! Choose one."
+        exit 198
+    }
 
-	* Display type of standard error chosen
-	if ( ("`robust'" == "") & ("`clusterby'" == "") ) {
-		di "Running regressby with normal OLS standard errors."
-	}
-	if ( "`robust'" != "" ) {
-		di "Running regressby with robust standard errors."
-	}
-	if ( "`clusterby'" != "" ) {
-		di "Running regressby with cluster-robust standard errors (clustered by `clusterby')."
-	}
+    * Display type of standard error chosen
+    if ( ("`robust'" == "") & ("`clusterby'" == "") ) {
+        di "Running regressby with normal OLS standard errors."
+    }
+    if ( "`robust'" != "" ) {
+        di "Running regressby with robust standard errors."
+    }
+    if ( "`clusterby'" != "" ) {
+        di "Running regressby with cluster-robust standard errors (clustered by `clusterby')."
+    }
 
-	if ( ("`plugin'" != "") & ("`clusterby'" != "") ) {
-		di as error "Option {opt plugin} does not yet support {opt vce(cluster)}"
-		exit 198
-	}
+    if ( ("`plugin'" != "") & ("`clusterby'" != "") ) {
+        di as error "Option {opt plugin} does not yet support {opt vce(cluster)}"
+        exit 198
+    }
 
-	if ( "`plugin'" != "" ) {
+    if ( "`plugin'" != "" ) {
         if ( inlist("`c(os)'", "MacOSX", "Windows") | strpos("`c(machine_type)'", "Mac") ) {
             disp as err "{opt plugin} only available on Linux"
             exit 198
         }
     }
 
-	* Preserve dataset in case we crash
-	preserve
+    * Preserve dataset in case we crash
+    preserve
 
-	* Construct analytical weight variable
+    * Construct analytical weight variable
     tempvar tmpwt
-	if ( "`weight'" != "" ) {
-		local wt [`weight'`exp']
-		gen `tmpwt' `exp'
-		di "Using analytical weights, weight `exp'."
+    if ( "`weight'" != "" ) {
+        local wt [`weight'`exp']
+        gen `tmpwt' `exp'
+        di "Using analytical weights, weight `exp'."
 
         * Display weighting scheme, if applicable
-		foreach v in `varlist' {
-			qui replace `v' = `v' * sqrt(`tmpwt')
-		}
-		qui replace `tmpwt' = sqrt(`tmpwt')
-	}
+        foreach v in `varlist' {
+            qui replace `v' = `v' * sqrt(`tmpwt')
+        }
+        qui replace `tmpwt' = sqrt(`tmpwt')
+    }
     else if ( "`noconstant'" == "" ) {
         gen byte `tmpwt' = 1
     }
 
-	* Sort using by-groups
+    * Sort using by-groups
     qui keep if `touse'
-	sort `by' `clusterby'
+    sort `by' `clusterby'
 
     * Generate single by-variable counting by groups
     local type = cond(`=_N' < maxlong(), "long", "double")
@@ -132,10 +134,10 @@ program define regressby
         qui replace `cluster' = sum(`cluster')
     }
 
-	* Also count number of variables here including constant
-	local num_x: list sizeof x
-	local num_g: list sizeof by
-	if ( "`noconstant'" == "" ){
+    * Also count number of variables here including constant
+    local num_x: list sizeof x
+    local num_g: list sizeof by
+    if ( "`noconstant'" == "" ){
         local ++num_x
         local cons 1
         local x `x' `tmpwt'
@@ -146,18 +148,18 @@ program define regressby
     scalar num_x = `num_x'
     scalar num_g = `num_g'
 
-	* Drop groups if num obs < parameters (NOTE: can do this ex post)
-	* qui by `grp': drop if (_N < `num_x')
-	* qui by `by': drop if (_N < `num_x')
+    * Drop groups if num obs < parameters (NOTE: can do this ex post)
+    * qui by `grp': drop if (_N < `num_x')
+    * qui by `by': drop if (_N < `num_x')
 
-	* Whether to keep covariances
+    * Whether to keep covariances
     local covs = ("`nocovariance'" == "")
 
     if ( "`benchmark'" != "" ) {
         regressby_timer info 99 `"Parsed variables and groups"', prints(1)
     }
 
-	* Perform regressions on each by-group, store in dataset
+    * Perform regressions on each by-group, store in dataset
     if ( "`plugin'" != "" ) {
         scalar regressby_constant    = `cons'
         scalar regressby_covariance  = `covs'
@@ -185,13 +187,13 @@ program define regressby
         regressby_timer off 99
     }
 
-	* Optionally save out to dta and just restore with a message
-	if ( "`save'" == "" ) {
-		restore, not
-	}
-	if ( "`save'" != "" ) {
-		save `save', `replace'
-	}
+    * Optionally save out to dta and just restore with a message
+    if ( "`save'" == "" ) {
+        restore, not
+    }
+    if ( "`save'" != "" ) {
+        save `save', `replace'
+    }
 
     clean_exit
     cap scalar drop num_x
@@ -201,12 +203,12 @@ end
 *-------------------------------------------------------------------------------
 * Mata program: _regressby3
 * Inputs:
-*  	- A y-var and x-var for an OLS regression
-*  	- A group var, for which each value represents a distinct by-group.
-*		This var must be in ascending order.
-*	- A list of numeric by-variables, whose groups correspond to th group var.
+*   - A y-var and x-var for an OLS regression
+*   - A group var, for which each value represents a distinct by-group.
+*       This var must be in ascending order.
+*   - A list of numeric by-variables, whose groups correspond to th group var.
 * Outputs:
-*  	- dataset of coefficients from OLS regression for each by-group
+*   - dataset of coefficients from OLS regression for each by-group
 *-------------------------------------------------------------------------------
 
 * yvar      = "`y'"
@@ -339,7 +341,7 @@ real matrix _regressby(
 
         // ------------ COMPUTE STANDARD ERRORS -----------------
         if ( hac0 ) {
-            V 	= XX_inv * sum(e:^2) / (nj - k)
+            V   = XX_inv * sum(e:^2) / (nj - k)
         }
         else if ( hac1 ) {
             V   = (nj / (nj - k)) * XX_inv * quadcross(X, e:^2, X) * XX_inv
