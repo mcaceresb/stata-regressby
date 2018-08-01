@@ -1,3 +1,5 @@
+*! version 0.1 01Aug2018
+
 *===============================================================================
 * PROGRAM: regressby.ado
 * PURPOSE: Performs fast grouped univariate OLS regressions.
